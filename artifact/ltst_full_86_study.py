@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 import warnings
 from dataclasses import asdict, dataclass
@@ -12,6 +13,17 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 import wfdb
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from geometry_lie import (
+    CANONICAL_LIE_FEATURE_COLUMNS,
+    compute_lie_state_features,
+    compute_projective_state_features,
+    ema_prior_states,
+)
 
 
 warnings.filterwarnings("ignore")
@@ -38,6 +50,8 @@ class LTSTConfig:
     min_energy_thresh: float = 1e-6
     alpha_slow: float = 0.2
     alpha_fast: float = 0.6
+    beta_short: float = 0.10
+    beta_long: float = 0.01
     beat_window_pre: int = 80
     beat_window_post: int = 120
     local_template_radius: int = 10
@@ -216,6 +230,31 @@ def add_local_template_features(df: pd.DataFrame, signal: np.ndarray, cfg: LTSTC
     return out
 
 
+def append_shared_geometry_features(df: pd.DataFrame, x_center: np.ndarray, cfg: LTSTConfig) -> pd.DataFrame:
+    out = df.copy().reset_index(drop=True)
+    if len(out) == 0:
+        return out
+    if len(x_center) != len(out):
+        raise ValueError("x_center rows must align with the beat-level frame.")
+
+    ms_prior = ema_prior_states(x_center, beta=cfg.beta_short)
+    ml_prior = ema_prior_states(x_center, beta=cfg.beta_long)
+    projective = compute_projective_state_features(
+        x_center,
+        ms_prior=ms_prior,
+        ml_prior=ml_prior,
+        min_state_energy=cfg.min_energy_thresh,
+    )
+    lie = compute_lie_state_features(
+        x_center,
+        ms_prior=ms_prior,
+        ml_prior=ml_prior,
+    )
+    for name, values in {**projective, **lie}.items():
+        out[name] = values
+    return out
+
+
 def build_beat_level_with_invariants(record: str, cfg: LTSTConfig) -> tuple[pd.DataFrame, dict[str, float]]:
     rec_dir = ensure_remote_access(record, cfg)
     rec = wfdb.rdrecord(record, pn_dir=rec_dir)
@@ -259,6 +298,7 @@ def build_beat_level_with_invariants(record: str, cfg: LTSTConfig) -> tuple[pd.D
 
     beat_lookup = {int(s): i for i, s in enumerate(beat_df["beat_sample"].astype(int).tolist())}
     rows: list[dict[str, object]] = []
+    x_center_rows: list[np.ndarray] = []
 
     for sample_idx, value in enumerate(signal):
         push(float(value))
@@ -281,6 +321,7 @@ def build_beat_level_with_invariants(record: str, cfg: LTSTConfig) -> tuple[pd.D
 
         x_curr = np.array([get_delayed(i * cfg.lag) for i in range(cfg.dim)], dtype=np.float64)
         x_past = np.array([get_delayed(int(rr) + i * cfg.lag) for i in range(cfg.dim)], dtype=np.float64)
+        x_curr_center = x_curr - float(np.mean(x_curr))
 
         sx = sy = sxx = syy = sxy = 0.0
         for vx, vy in zip(x_curr, x_past):
@@ -372,11 +413,15 @@ def build_beat_level_with_invariants(record: str, cfg: LTSTConfig) -> tuple[pd.D
                 "cos_signed": cos_signed,
             }
         )
+        x_center_rows.append(x_curr_center)
 
     df = pd.DataFrame(rows)
     df = df[df["status"] == FLAG_OK].copy().reset_index(drop=True)
     if len(df) == 0:
         raise RuntimeError(f"{record}: no valid beat-level rows")
+    x_center = np.vstack(x_center_rows) if x_center_rows else np.empty((0, cfg.dim), dtype=np.float64)
+    if len(x_center) != len(df):
+        raise RuntimeError(f"{record}: shared geometry rows did not align with valid beat rows")
 
     intervals, diag, err = load_st_intervals(record, cfg.st_ext, rec_dir)
     if intervals is None or diag is None:
@@ -384,6 +429,7 @@ def build_beat_level_with_invariants(record: str, cfg: LTSTConfig) -> tuple[pd.D
 
     df = attach_st(df, intervals)
     df = add_local_template_features(df, signal, cfg)
+    df = append_shared_geometry_features(df, x_center=x_center, cfg=cfg)
     df["baseline_score"] = 1.0 - df["local_template_corr"].astype(float)
     df["kernel_score_angle"] = df["twist_angle"].clip(lower=0) * df["ema_fast"].clip(lower=0)
     df["kernel_score_long"] = df["twist_sq"].clip(lower=0) * df["ema_slow"].clip(lower=0)

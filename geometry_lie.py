@@ -143,7 +143,7 @@ def compute_lie_state_features(
     x: np.ndarray,
     ms_prior: np.ndarray,
     ml_prior: np.ndarray,
-    sfreq: float,
+    sfreq: float = 1.0,
     chunk_size: int = 50000,
 ) -> dict[str, np.ndarray]:
     n_rows = len(x)

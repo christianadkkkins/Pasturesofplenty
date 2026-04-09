@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,17 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from geometry_lie import (
+    CANONICAL_LIE_FEATURE_COLUMNS,
+    CANONICAL_PROJECTIVE_REFERENCE_COLUMNS,
+    canonical_lie_transition_score,
+    canonical_projective_transition_score,
+)
 
 
 EPS = 1e-9
@@ -36,6 +48,17 @@ BEAT_COLUMNS = [
     "kernel_score_angle",
     "kernel_score_long",
     "kernel_score_hybrid",
+    "memory_align",
+    "novelty",
+    "proj_lock_barrier_sl",
+    "proj_lock_barrier_xl",
+    "proj_volume_xsl",
+    "gram_trace",
+    "gram_logdet",
+    "lie_orbit_norm",
+    "lie_strain_norm",
+    "lie_commutator_norm",
+    "lie_metric_drift",
     "st_event",
     "st_episode_id",
 ]
@@ -106,11 +129,20 @@ def read_beat_frame(beat_level_dir: Path, record: str) -> pd.DataFrame:
     csv_path = beat_level_dir / f"{record}.csv"
     if parquet_path.exists():
         try:
-            return pd.read_parquet(parquet_path, columns=BEAT_COLUMNS)
+            frame = pd.read_parquet(parquet_path)
         except Exception:
-            pass
+            frame = None
+        else:
+            for column in BEAT_COLUMNS:
+                if column not in frame.columns:
+                    frame[column] = np.nan
+            return frame[BEAT_COLUMNS]
     if csv_path.exists():
-        return pd.read_csv(csv_path, usecols=BEAT_COLUMNS)
+        frame = pd.read_csv(csv_path)
+        for column in BEAT_COLUMNS:
+            if column not in frame.columns:
+                frame[column] = np.nan
+        return frame[BEAT_COLUMNS]
     raise FileNotFoundError(f"Missing beat-level file for {record}.")
 
 
@@ -213,18 +245,70 @@ def build_relative_feature_frame(df: pd.DataFrame, cfg: TransitionHMMConfig) -> 
     for column in ["level_norm_raw", "velocity_norm_raw", "curvature_norm_raw"]:
         out[column.replace("_raw", "")] = trailing_roll(out[column].to_numpy(dtype=float), window=window, reducer="mean")
 
-    out["transition_score_raw"] = np.sqrt(
+    out["hmm_transition_score_raw"] = np.sqrt(
         cfg.level_weight * np.square(out["level_norm"].to_numpy(dtype=float))
         + cfg.velocity_weight * np.square(out["velocity_norm"].to_numpy(dtype=float))
         + cfg.curvature_weight * np.square(out["curvature_norm"].to_numpy(dtype=float))
         + cfg.stiffness_weight * np.square(out["acc_stiffness_proxy"].to_numpy(dtype=float))
     )
-    out["transition_score"] = trailing_roll(out["transition_score_raw"].to_numpy(dtype=float), window=window, reducer="mean")
+    out["hmm_transition_score"] = trailing_roll(
+        out["hmm_transition_score_raw"].to_numpy(dtype=float),
+        window=window,
+        reducer="mean",
+    )
 
-    for metric in ["level_norm", "velocity_norm", "curvature_norm", "transition_score"]:
+    for metric in ["level_norm", "velocity_norm", "curvature_norm", "hmm_transition_score"]:
         center, scale = robust_center_scale(out.loc[baseline_idx, metric].to_numpy(dtype=float))
         out[f"{metric}_z"] = (out[metric].to_numpy(dtype=float) - center) / (scale + EPS)
         out[f"{metric}_z"] = np.where(np.isfinite(out[f"{metric}_z"].to_numpy(dtype=float)), out[f"{metric}_z"], 0.0)
+
+    projective_reference_cols = list(CANONICAL_PROJECTIVE_REFERENCE_COLUMNS)
+    for column in projective_reference_cols:
+        center, scale = robust_center_scale(out.loc[baseline_idx, column].to_numpy(dtype=float))
+        out[f"baseline_center_{column}"] = center
+        out[f"baseline_scale_{column}"] = scale
+        out[f"projective_rel_{column}"] = (out[column].to_numpy(dtype=float) - center) / (scale + EPS)
+        out[f"projective_vel_{column}"] = np.r_[0.0, np.diff(out[f"projective_rel_{column}"].to_numpy(dtype=float))]
+        out[f"projective_acc_{column}"] = np.r_[0.0, np.diff(out[f"projective_vel_{column}"].to_numpy(dtype=float))]
+
+    projective_rel_cols = [f"projective_rel_{column}" for column in projective_reference_cols]
+    projective_vel_cols = [f"projective_vel_{column}" for column in projective_reference_cols]
+    projective_acc_cols = [f"projective_acc_{column}" for column in projective_reference_cols]
+    out["projective_level_norm_raw"] = np.sqrt(np.sum(np.square(out[projective_rel_cols].to_numpy(dtype=float)), axis=1))
+    out["projective_velocity_norm_raw"] = np.sqrt(np.sum(np.square(out[projective_vel_cols].to_numpy(dtype=float)), axis=1))
+    out["projective_curvature_norm_raw"] = np.sqrt(np.sum(np.square(out[projective_acc_cols].to_numpy(dtype=float)), axis=1))
+
+    for column in ["projective_level_norm_raw", "projective_velocity_norm_raw", "projective_curvature_norm_raw"]:
+        out[column.replace("_raw", "")] = trailing_roll(out[column].to_numpy(dtype=float), window=window, reducer="mean")
+
+    barrier_acc = np.nan_to_num(out["projective_acc_proj_lock_barrier_sl"].to_numpy(dtype=float), nan=0.0)
+    novelty_vel = np.nan_to_num(out["projective_vel_novelty"].to_numpy(dtype=float), nan=0.0)
+    out["transition_score_raw"] = canonical_projective_transition_score(
+        level=out["projective_level_norm"].to_numpy(dtype=float),
+        velocity=out["projective_velocity_norm"].to_numpy(dtype=float),
+        curvature=out["projective_curvature_norm"].to_numpy(dtype=float),
+        barrier_acc=barrier_acc,
+        novelty_vel=novelty_vel,
+    )
+    out["transition_score"] = trailing_roll(out["transition_score_raw"].to_numpy(dtype=float), window=window, reducer="mean")
+
+    for metric in ["projective_level_norm", "projective_velocity_norm", "projective_curvature_norm", "transition_score"]:
+        center, scale = robust_center_scale(out.loc[baseline_idx, metric].to_numpy(dtype=float))
+        out[f"{metric}_z"] = (out[metric].to_numpy(dtype=float) - center) / (scale + EPS)
+        out[f"{metric}_z"] = np.where(np.isfinite(out[f"{metric}_z"].to_numpy(dtype=float)), out[f"{metric}_z"], 0.0)
+
+    for metric in CANONICAL_LIE_FEATURE_COLUMNS:
+        center, scale = robust_center_scale(out.loc[baseline_idx, metric].to_numpy(dtype=float))
+        out[f"{metric}_z"] = (out[metric].to_numpy(dtype=float) - center) / (scale + EPS)
+        out[f"{metric}_z"] = np.where(np.isfinite(out[f"{metric}_z"].to_numpy(dtype=float)), out[f"{metric}_z"], 0.0)
+
+    out["lie_transition_score"] = canonical_lie_transition_score(
+        orbit_z=out["lie_orbit_norm_z"].to_numpy(dtype=float),
+        strain_z=out["lie_strain_norm_z"].to_numpy(dtype=float),
+        commutator_z=out["lie_commutator_norm_z"].to_numpy(dtype=float),
+        metric_drift_z=out["lie_metric_drift_z"].to_numpy(dtype=float),
+        gram_logdet_z=out["gram_logdet_z"].to_numpy(dtype=float),
+    )
 
     phenotype = str(out["phenotype_target"].iloc[0])
     out["routed_reference_score"] = routed_reference_score(out, phenotype)
@@ -488,7 +572,9 @@ def state_runs(states: np.ndarray) -> dict[str, int]:
 
 def evaluate_record(record_df: pd.DataFrame, cfg: TransitionHMMConfig) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     frame = build_relative_feature_frame(record_df, cfg)
-    logits = emission_logits(frame)
+    hmm_frame = frame.copy()
+    hmm_frame["transition_score_z"] = hmm_frame["hmm_transition_score_z"]
+    logits = emission_logits(hmm_frame)
     state_idx = viterbi_decode(logits)
     frame["state"] = [STATE_ORDER[int(idx)] for idx in state_idx]
     frame["state_code"] = state_idx
@@ -589,8 +675,12 @@ def evaluate_record(record_df: pd.DataFrame, cfg: TransitionHMMConfig) -> tuple[
         "baseline_center_drift_norm": float(frame["baseline_center_drift_norm"].iloc[0]),
         "baseline_center_energy_asym": float(frame["baseline_center_energy_asym"].iloc[0]),
         "baseline_center_stiffness_proxy": float(frame["baseline_center_stiffness_proxy"].iloc[0]),
+        "median_hmm_transition_score_z": float(np.nanmedian(frame["hmm_transition_score_z"].to_numpy(dtype=float))),
+        "p95_hmm_transition_score_z": float(np.nanquantile(frame["hmm_transition_score_z"].to_numpy(dtype=float), 0.95)),
         "median_transition_score_z": float(np.nanmedian(frame["transition_score_z"].to_numpy(dtype=float))),
         "p95_transition_score_z": float(np.nanquantile(frame["transition_score_z"].to_numpy(dtype=float), 0.95)),
+        "median_lie_transition_score": float(np.nanmedian(frame["lie_transition_score"].to_numpy(dtype=float))),
+        "p95_lie_transition_score": float(np.nanquantile(frame["lie_transition_score"].to_numpy(dtype=float), 0.95)),
         **state_runs(state_idx),
     }
     if event_rows:
@@ -619,9 +709,11 @@ def plot_exemplar(record: str, frame: pd.DataFrame, out_dir: Path, cfg: Transiti
     x = np.arange(lo - onset_idx, hi - onset_idx, dtype=int)
 
     fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
-    axes[0].plot(x, window["transition_score_z"], label="transition_score_z", color="#1b9e77")
+    axes[0].plot(x, window["hmm_transition_score_z"], label="hmm_transition_score_z", color="#1b9e77")
+    axes[0].plot(x, window["transition_score_z"], label="projective_transition_score_z", color="#66a61e", alpha=0.75)
+    axes[0].plot(x, window["lie_transition_score"], label="lie_transition_score", color="#7570b3", alpha=0.75)
     axes[0].plot(x, window["routed_reference_score_z"], label="routed_score_z", color="#d95f02", alpha=0.8)
-    axes[0].plot(x, window["hybrid_reference_score_z"], label="hybrid_score_z", color="#7570b3", alpha=0.8)
+    axes[0].plot(x, window["hybrid_reference_score_z"], label="hybrid_score_z", color="#e7298a", alpha=0.8)
     axes[0].axvline(0, color="black", linestyle="--", linewidth=1.0)
     axes[0].set_ylabel("Robust z")
     axes[0].legend(loc="upper left")
@@ -655,11 +747,13 @@ def write_report(cfg: TransitionHMMConfig, out_dir: Path, event_df: pd.DataFrame
     lines = [
         "# LTST Relative-Geometry Transition HMM",
         "",
-        "First cardiac port of the PMU-style architecture: relative primitive geometry, velocity/acceleration features, and windowed HMM smoothing over beat windows.",
+        "First cardiac port of the PMU-style architecture: legacy relative primitive geometry for the frozen HMM, plus canonical projective and derivative Gram/Lie sidecar features over beat windows.",
         "",
         "## Inputs",
         "- `rel/vel/acc` of `poincare_b`, `drift_norm`, `energy_asym`",
         "- host-only `stiffness_proxy = poincare_b / (drift_norm + eps)`",
+        "- canonical projective sidecar: `memory_align`, `novelty`, `proj_lock_barrier_sl`, `proj_lock_barrier_xl`, `proj_volume_xsl`",
+        "- derivative Gram/Lie sidecar: `gram_trace`, `gram_logdet`, `lie_orbit_norm`, `lie_strain_norm`, `lie_commutator_norm`, `lie_metric_drift`",
         "- HMM states: `baseline`, `transition`, `active`",
         f"- HMM alert extraction: `transition` onset plus `{int(cfg.alert_active_tail_beats)}`-beat `active` tail, capped at `{int(cfg.alert_max_beats)}` beats",
         f"- HMM alert cooldown: suppress re-arming for `{int(cfg.alert_cooldown_beats)}` beats after each alert",
@@ -766,7 +860,14 @@ def main() -> None:
         "n_events": int(len(event_df)),
         "n_episodes": int(len(episode_df)),
         "states": STATE_ORDER,
-        "inputs": ["rel/vel/acc poincare_b", "rel/vel/acc drift_norm", "rel/vel/acc energy_asym", "rel/vel/acc stiffness_proxy"],
+        "inputs": [
+            "rel/vel/acc poincare_b",
+            "rel/vel/acc drift_norm",
+            "rel/vel/acc energy_asym",
+            "rel/vel/acc stiffness_proxy",
+            *CANONICAL_PROJECTIVE_REFERENCE_COLUMNS,
+            *CANONICAL_LIE_FEATURE_COLUMNS,
+        ],
     }
     with (out_dir / "ltst_transition_hmm_metadata.json").open("w", encoding="utf-8") as fp:
         json.dump(metadata, fp, indent=2)

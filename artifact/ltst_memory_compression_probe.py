@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -15,10 +16,16 @@ import numpy as np
 import pandas as pd
 import wfdb
 
-try:
-    from scipy.signal import lfilter
-except Exception:
-    lfilter = None
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from geometry_lie import (
+    CANONICAL_LIE_FEATURE_COLUMNS,
+    compute_lie_state_features,
+    compute_projective_state_features,
+    ema_prior_states,
+)
 
 
 EPS = 1e-12
@@ -142,21 +149,6 @@ def finite_primary_mask(df: pd.DataFrame) -> pd.Series:
     return np.isfinite(df[PRIMARY_FEATURE_COLUMNS]).all(axis=1)
 
 
-def ema_filter_states(x: np.ndarray, beta: float) -> np.ndarray:
-    if len(x) == 0:
-        return np.empty_like(x)
-    if lfilter is not None:
-        filtered = lfilter([beta], [1.0, -(1.0 - beta)], x, axis=0)
-        return np.vstack([np.zeros((1, x.shape[1]), dtype=np.float64), filtered[:-1]])
-
-    state = np.zeros(x.shape[1], dtype=np.float64)
-    out = np.zeros_like(x, dtype=np.float64)
-    for idx in range(len(x)):
-        out[idx] = state
-        state = beta * x[idx] + (1.0 - beta) * state
-    return out
-
-
 def _interval_mask(samples: np.ndarray, intervals: list[tuple[int, int]]) -> np.ndarray:
     mask = np.zeros(len(samples), dtype=bool)
     for start, end in intervals:
@@ -230,6 +222,11 @@ def compute_local_record_summary(df: pd.DataFrame, baseline_beats: int = 500) ->
         "baseline_median_linger": median(baseline, "linger"),
         "baseline_median_memory_gap": median(baseline, "memory_gap"),
         "baseline_median_novelty": median(baseline, "novelty"),
+        "baseline_median_gram_logdet": median(baseline, "gram_logdet"),
+        "baseline_median_lie_orbit_norm": median(baseline, "lie_orbit_norm"),
+        "baseline_median_lie_strain_norm": median(baseline, "lie_strain_norm"),
+        "baseline_median_lie_commutator_norm": median(baseline, "lie_commutator_norm"),
+        "baseline_median_lie_metric_drift": median(baseline, "lie_metric_drift"),
         "st_median_proj_line_lock_sl": median(st, "proj_line_lock_sl"),
         "st_median_temporal_area_loss": median(st, "temporal_area_loss"),
         "st_median_proj_line_lock_xl": median(st, "proj_line_lock_xl"),
@@ -240,6 +237,11 @@ def compute_local_record_summary(df: pd.DataFrame, baseline_beats: int = 500) ->
         "st_median_temporal_volume_3": median(st, "temporal_volume_3"),
         "st_median_log_temporal_volume_3": median(st, "log_temporal_volume_3"),
         "st_median_temporal_volume_3_raw": median(st, "temporal_volume_3_raw"),
+        "st_median_gram_logdet": median(st, "gram_logdet"),
+        "st_median_lie_orbit_norm": median(st, "lie_orbit_norm"),
+        "st_median_lie_strain_norm": median(st, "lie_strain_norm"),
+        "st_median_lie_commutator_norm": median(st, "lie_commutator_norm"),
+        "st_median_lie_metric_drift": median(st, "lie_metric_drift"),
         "memory_lock_barrier_st_over_baseline": safe_ratio(
             median(st, "memory_lock_barrier"),
             median(baseline, "memory_lock_barrier"),
@@ -287,55 +289,41 @@ def build_memory_probe(record: str, cfg: MemoryConfig, regime_lookup: dict[str, 
     x_center = x_center[energy_mask]
     n_x = n_x[energy_mask]
 
-    ms = ema_filter_states(x_center, cfg.beta_short)
-    ml = ema_filter_states(x_center, cfg.beta_long)
+    ms = ema_prior_states(x_center, cfg.beta_short)
+    ml = ema_prior_states(x_center, cfg.beta_long)
 
     n_s = np.einsum("td,td->t", ms, ms)
     n_l = np.einsum("td,td->t", ml, ml)
     d_sl = np.einsum("td,td->t", ms, ml)
+    projective = compute_projective_state_features(
+        x_center,
+        ms_prior=ms,
+        ml_prior=ml,
+        min_state_energy=cfg.min_energy_thresh,
+    )
+    lie = compute_lie_state_features(
+        x_center,
+        ms_prior=ms,
+        ml_prior=ml,
+    )
+
+    memory_align = projective["memory_align"]
+    linger = projective["linger"]
+    proj_line_lock_sl = projective["proj_line_lock_sl"]
+    proj_area_sl = projective["proj_area_sl"]
+    proj_line_lock_xl = projective["proj_line_lock_xl"]
+    proj_transverse_xl = projective["proj_transverse_xl"]
+    proj_lock_barrier_sl = projective["proj_lock_barrier_sl"]
+    proj_lock_barrier_xl = projective["proj_lock_barrier_xl"]
+    delta_explain = projective["short_long_explanation_imbalance"]
+    temporal_volume_3 = projective["proj_volume_xsl"]
+    log_temporal_volume_3 = projective["log_proj_volume_xsl"]
+
     d_xs = np.einsum("td,td->t", x_center, ms)
     d_xl = np.einsum("td,td->t", x_center, ml)
-
-    memory_align = np.full(len(x_center), np.nan, dtype=np.float64)
-    linger = np.full(len(x_center), np.nan, dtype=np.float64)
-    proj_line_lock_sl = np.full(len(x_center), np.nan, dtype=np.float64)
-    proj_area_sl = np.full(len(x_center), np.nan, dtype=np.float64)
-    proj_line_lock_xl = np.full(len(x_center), np.nan, dtype=np.float64)
-    proj_transverse_xl = np.full(len(x_center), np.nan, dtype=np.float64)
-    proj_lock_barrier_sl = np.full(len(x_center), np.nan, dtype=np.float64)
-    proj_lock_barrier_xl = np.full(len(x_center), np.nan, dtype=np.float64)
-    delta_explain = np.full(len(x_center), np.nan, dtype=np.float64)
-    temporal_volume_3 = np.full(len(x_center), np.nan, dtype=np.float64)
-    temporal_volume_3_raw = np.full(len(x_center), np.nan, dtype=np.float64)
-    log_temporal_volume_3 = np.full(len(x_center), np.nan, dtype=np.float64)
-
     sl_mask = (n_s > EPS) & (n_l > EPS)
-    xl_mask = n_l > EPS
-
+    temporal_volume_3_raw = np.full(len(x_center), np.nan, dtype=np.float64)
     if np.any(sl_mask):
-        memory_align[sl_mask] = d_sl[sl_mask] / (np.sqrt(n_s[sl_mask] * n_l[sl_mask]) + EPS)
-        proj_line_lock_sl[sl_mask] = np.clip(
-            (d_sl[sl_mask] ** 2) / (n_s[sl_mask] * n_l[sl_mask] + EPS),
-            0.0,
-            1.0,
-        )
-        proj_area_sl[sl_mask] = np.clip(1.0 - proj_line_lock_sl[sl_mask], 0.0, 1.0)
-        proj_lock_barrier_sl[sl_mask] = -np.log(proj_area_sl[sl_mask] + EPS)
-
-    if np.any(xl_mask):
-        linger[xl_mask] = d_xl[xl_mask] / (np.sqrt(n_x[xl_mask] * n_l[xl_mask]) + EPS)
-        proj_line_lock_xl[xl_mask] = np.clip(
-            (d_xl[xl_mask] ** 2) / (n_x[xl_mask] * n_l[xl_mask] + EPS),
-            0.0,
-            1.0,
-        )
-        proj_transverse_xl[xl_mask] = np.clip(1.0 - proj_line_lock_xl[xl_mask], 0.0, 1.0)
-        proj_lock_barrier_xl[xl_mask] = -np.log(proj_transverse_xl[xl_mask] + EPS)
-
-    if np.any(sl_mask):
-        delta_explain[sl_mask] = (d_xs[sl_mask] ** 2) / (n_x[sl_mask] * n_s[sl_mask] + EPS) - (
-            d_xl[sl_mask] ** 2
-        ) / (n_x[sl_mask] * n_l[sl_mask] + EPS)
         temporal_volume_raw = (
             n_x[sl_mask] * n_s[sl_mask] * n_l[sl_mask]
             + 2.0 * d_xs[sl_mask] * d_xl[sl_mask] * d_sl[sl_mask]
@@ -343,17 +331,10 @@ def build_memory_probe(record: str, cfg: MemoryConfig, regime_lookup: dict[str, 
             - n_s[sl_mask] * (d_xl[sl_mask] ** 2)
             - n_l[sl_mask] * (d_xs[sl_mask] ** 2)
         )
-        temporal_volume_raw = np.maximum(temporal_volume_raw, 0.0)
-        temporal_volume_3_raw[sl_mask] = temporal_volume_raw
-        temporal_volume_3[sl_mask] = np.clip(
-            temporal_volume_raw / (n_x[sl_mask] * n_s[sl_mask] * n_l[sl_mask] + EPS),
-            0.0,
-            1.0,
-        )
-        log_temporal_volume_3[sl_mask] = np.log(temporal_volume_3[sl_mask] + EPS)
+        temporal_volume_3_raw[sl_mask] = np.maximum(temporal_volume_raw, 0.0)
 
     memory_gap = n_s + n_l - 2.0 * d_sl
-    novelty = np.where(np.isfinite(linger), 1.0 - linger, np.nan)
+    novelty = projective["novelty"]
 
     beat_sample_vec = valid_beat_df["beat_sample"].to_numpy(dtype=int)
     st_event = _interval_mask(beat_sample_vec, intervals)
@@ -393,6 +374,7 @@ def build_memory_probe(record: str, cfg: MemoryConfig, regime_lookup: dict[str, 
             "linger": linger,
             "memory_gap": memory_gap,
             "novelty": novelty,
+            **lie,
         }
     )
     if len(df) == 0:
@@ -488,7 +470,7 @@ def main() -> None:
     report = [
         "# LTST Gram-Memory Probe",
         "",
-        "Two-timescale O(d) Gram-memory geometry on selected LTST records.",
+        "Two-timescale O(d) Gram-memory geometry on selected LTST records, extended with the canonical derivative Gram/Lie sidecar.",
         "",
         summary_df.to_markdown(index=False),
         "",
