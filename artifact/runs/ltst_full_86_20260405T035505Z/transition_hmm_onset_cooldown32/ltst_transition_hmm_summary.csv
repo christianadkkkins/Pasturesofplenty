@@ -1,0 +1,7 @@
+metric,hmm,routed,hybrid
+events_visible_fraction,0.9405,0.116625,0.177
+median_lead_beats,429.0,284.0,268.0
+median_overlap_fraction,0.1998433649845067,0.0,1.0
+median_pre_event_fraction,0.334,0.0,1.0
+events_hmm_improves_over_routed,7264.0,,
+events_hmm_improves_over_hybrid,7190.0,,

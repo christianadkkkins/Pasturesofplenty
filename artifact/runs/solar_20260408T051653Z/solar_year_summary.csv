@@ -1,0 +1,9 @@
+year,n_events,n_poincare_before_storm,n_gram_before_storm,n_hmm_before_storm,median_poincare_lead_to_storm_min,median_gram_lead_to_storm_min,median_hmm_lead_to_storm_min,median_bz_southward_lead_to_storm_min,top_lead_feature,top_combined_lead_feature
+2002,139,130,113,128,694.0,705.0,292.0,60.0,poincare_b,poincare_b
+2003,163,149,137,144,691.0,700.0,270.0,63.0,gram_spread_sq,gram_spread_sq
+2004,93,91,78,87,689.0,702.0,210.0,67.0,poincare_b,poincare_b
+2005,111,105,93,105,694.0,712.0,309.0,88.0,poincare_b,poincare_b
+2006,49,47,40,48,662.0,700.5,262.5,21.0,poincare_b,poincare_b
+2007,14,14,11,14,696.0,711.0,295.0,37.0,gram_spread_sq,poincare_b
+2008,15,14,12,15,714.5,651.0,308.0,35.0,poincare_b,poincare_b
+2009,5,5,5,5,684.0,693.0,230.0,24.0,gram_spread_sq,gram_spread_sq

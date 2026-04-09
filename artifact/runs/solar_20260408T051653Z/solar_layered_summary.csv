@@ -1,0 +1,2 @@
+n_events,n_poincare_before_storm,n_gram_before_storm,n_hmm_before_storm,n_poincare_before_bz,n_gram_before_bz,n_hmm_before_bz,n_hmm_chosen_as_combined_lead,median_poincare_lead_to_storm_min,median_gram_lead_to_storm_min,median_hmm_lead_to_storm_min,median_bz_southward_lead_to_storm_min,tp_minutes,fp_minutes,tn_minutes,fn_minutes,sensitivity,specificity,precision,alert_occupancy_fraction
+589,555,489,546,424,385,339,125,693.0,701.0,279.5,57.0,261704,852318,2634215,459443,0.36289965846075767,0.7555399590366705,0.23491816140076227,0.2647592022207012
