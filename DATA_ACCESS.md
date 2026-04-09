@@ -41,6 +41,50 @@ PY
 
 If you create a local mirror, the raw PhysioNet files will live under `data/ltstdb/`.
 
+## LTST ESP32 Replay And Contract Data
+
+Official upstream source:
+
+- The ESP32 scaffold does not use a separate public dataset. Its replay assets and contract-simulation outputs are derived from the same PhysioNet LTST source above.
+
+What the repo uses:
+
+- A completed LTST cohort run under `artifact/runs/ltst_full_86_*`
+- Replay-sample export assets generated from that LTST run:
+  - `ESP32/generated/ltst_v1_replay_samples_generated.h`
+  - `ESP32/generated/ltst_v1_replay_samples_manifest.json`
+- Frozen contract-simulation outputs under:
+  - `artifact/runs/ltst_full_86_20260405T035505Z/esp32_contract_sim/`
+
+Exact script paths:
+
+- [`ESP32/ltst_v1_export_replay_samples.py`](ESP32/ltst_v1_export_replay_samples.py)
+- [`ESP32/ltst_esp32_contract_sim.py`](ESP32/ltst_esp32_contract_sim.py)
+- [`ESP32/README.md`](ESP32/README.md)
+
+Exact local inputs and outputs expected by the code:
+
+- source LTST run directory:
+  - `artifact/runs/ltst_full_86_20260405T035505Z`
+- generated replay header:
+  - `ESP32/generated/ltst_v1_replay_samples_generated.h`
+- generated replay manifest:
+  - `ESP32/generated/ltst_v1_replay_samples_manifest.json`
+- frozen contract packet table:
+  - `artifact/runs/ltst_full_86_20260405T035505Z/esp32_contract_sim/ltst_esp32_contract_packets.csv`
+
+To regenerate the replay assets from the frozen LTST run:
+
+```bash
+python ESP32/ltst_v1_export_replay_samples.py --run-dir artifact/runs/ltst_full_86_20260405T035505Z
+```
+
+To rerun the host-side fixed-point contract simulation:
+
+```bash
+python results/reproduce.py esp32-contract --run-dir artifact/runs/ltst_full_86_20260405T035505Z
+```
+
 ## Solar Data (OMNI HRO2 1-minute)
 
 Official sources:

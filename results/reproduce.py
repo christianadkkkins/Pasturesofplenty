@@ -82,6 +82,19 @@ def run_ltst_hmm(run_dir: Path | None) -> None:
     )
 
 
+def run_esp32_contract(run_dir: Path | None) -> None:
+    base_run_dir = run_dir.resolve() if run_dir else find_latest_ltst_run()
+    script = REPO_ROOT / "ESP32" / "ltst_esp32_contract_sim.py"
+    run_command(
+        [
+            sys.executable,
+            str(script),
+            "--run-dir",
+            str(base_run_dir),
+        ]
+    )
+
+
 def run_solar_hmm() -> None:
     script = REPO_ROOT / "solar.py"
     run_command(
@@ -125,7 +138,7 @@ def run_solar_figure(alignment_csv: Path, output: Path) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Cross-platform reproduction runner for the finished cardiac and solar results.")
+    parser = argparse.ArgumentParser(description="Cross-platform reproduction runner for the finished cardiac, ESP32, and solar results.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ltst_full = subparsers.add_parser("ltst-full", help="Rebuild the 86-record LTST cohort from PhysioNet.")
@@ -133,6 +146,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     ltst_hmm = subparsers.add_parser("ltst-hmm", help="Run the finalized LTST transition-HMM and derive beat-level metrics.")
     ltst_hmm.add_argument(
+        "--run-dir",
+        type=Path,
+        default=None,
+        help="Base ltst_full_86_* run directory. Defaults to the latest matching run under artifact/runs.",
+    )
+
+    esp32_contract = subparsers.add_parser("esp32-contract", help="Run the LTST-derived ESP32 fixed-point contract simulation.")
+    esp32_contract.add_argument(
         "--run-dir",
         type=Path,
         default=None,
@@ -150,7 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output PNG path for the regenerated figure.",
     )
 
-    all_parser = subparsers.add_parser("all", help="Run the full LTST cohort build, LTST HMM, and solar HMM in sequence.")
+    all_parser = subparsers.add_parser("all", help="Run the full LTST cohort build, LTST HMM, ESP32 contract simulation, and solar HMM in sequence.")
     all_parser.add_argument("--records", default="all", help="Comma-separated LTST records or 'all'.")
 
     return parser
@@ -166,6 +187,9 @@ def main() -> None:
     if args.command == "ltst-hmm":
         run_ltst_hmm(run_dir=args.run_dir)
         return
+    if args.command == "esp32-contract":
+        run_esp32_contract(run_dir=args.run_dir)
+        return
     if args.command == "solar-hmm":
         run_solar_hmm()
         return
@@ -175,6 +199,7 @@ def main() -> None:
     if args.command == "all":
         run_ltst_full(records=args.records)
         run_ltst_hmm(run_dir=None)
+        run_esp32_contract(run_dir=None)
         run_solar_hmm()
         return
     raise ValueError(f"Unsupported command: {args.command}")

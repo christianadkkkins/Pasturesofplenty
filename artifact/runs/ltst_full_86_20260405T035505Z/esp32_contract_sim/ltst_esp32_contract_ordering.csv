@@ -1,0 +1,7 @@
+metric,order
+ref_poincare_b_median_500,s20021 < s20041 < s20151 < s30742
+emu_poincare_b_median_500,s20021 < s20041 < s20151 < s30742
+ref_drift_norm_median_500,s20021 < s20041 < s20151 < s30742
+emu_drift_norm_median_500,s20021 < s20041 < s20151 < s30742
+ref_stiffness_proxy_median_500,s20021 < s20041 < s20151 < s30742
+emu_stiffness_proxy_median_500,s20021 < s20041 < s20151 < s30742

@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "ltst_v1_transport.c"
+        "ltst_v1_commands.c"
+        "ltst_v1_replay_samples.c"
+        "ltst_v1_live_pipeline.c"
+    INCLUDE_DIRS
+        "."
+        ".."
+        "../generated"
+    REQUIRES
+        driver
+        esp_adc
+        esp_timer
+)

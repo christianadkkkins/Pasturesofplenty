@@ -1,0 +1,5 @@
+{
+  "generated_at_utc": null,
+  "note": "Placeholder manifest. Run ltst_v1_export_replay_samples.py to generate LTST-backed replay assets.",
+  "records": {}
+}

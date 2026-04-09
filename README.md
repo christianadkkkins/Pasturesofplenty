@@ -2,9 +2,10 @@
 
 Pasturesofplenty is a compact public snapshot of the current cross-domain geometric early-warning work in this project.
 
-The repo is organized around three frozen experiment tracks:
+The repo is organized around four frozen experiment tracks:
 
 - cardiac ST-event analysis on PhysioNet LTST
+- embedded ESP32 contract validation derived from LTST benchmark exemplars
 - solar-wind / geomagnetic storm analysis on OMNI HRO2 one-minute data
 - micro-PMU event analysis on the LBNL October 1 dataset
 

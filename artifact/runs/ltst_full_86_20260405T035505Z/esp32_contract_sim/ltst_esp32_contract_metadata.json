@@ -1,0 +1,20 @@
+{
+  "config": {
+    "run_dir": "C:\\Users\\Admin\\Documents\\Bearings\\artifact\\runs\\ltst_full_86_20260405T035505Z",
+    "out_dir_name": "esp32_contract_sim",
+    "records": [
+      "s20021",
+      "s20041",
+      "s20151",
+      "s30742"
+    ],
+    "baseline_window_beats": [
+      64,
+      250,
+      500
+    ],
+    "low_energy_floor": 1e-06
+  },
+  "n_records": 4,
+  "n_packets": 388590
+}
