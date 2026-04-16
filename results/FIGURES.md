@@ -4,11 +4,11 @@
 
 `Figure 2. Solar wind router alignment around geomagnetic storm onset.` can be regenerated directly from the saved alignment table or by rerunning the full solar layered pipeline.
 
-### Regenerate from a local alignment CSV
+### Regenerate from the frozen completed alignment CSV
 
 ```bash
 python results/reproduce.py solar-figure \
-  --alignment-csv artifact/runs/<your_solar_run>/solar_alignment.csv \
+  --alignment-csv artifact/runs/solar_20260408T051653Z/solar_alignment.csv \
   --output artifact/figures/figure2_solar_alignment_plot.png
 ```
 
@@ -18,7 +18,7 @@ python results/reproduce.py solar-figure \
 python results/reproduce.py solar-hmm
 ```
 
-That command creates a fresh `artifact/runs/solar_*/solar_alignment.csv` and rewrites `artifact/runs/solar_*/solar_alignment_plot.png` as part of the full solar pipeline.
+That command rewrites `artifact/runs/solar_*/solar_alignment_plot.png` as part of the full solar pipeline.
 
 ## Figure 1
 

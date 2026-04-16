@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 from collections import defaultdict
+from typing import Any
 from pathlib import Path
 
 
@@ -46,35 +47,46 @@ def intersection_length(a: list[tuple[int, int]], b: list[tuple[int, int]]) -> i
     return total
 
 
-def compute_metrics(run_dir: Path, pre_event_beats: int) -> list[tuple[str, float | int]]:
+def compute_metrics_from_tables(
+    *,
+    record_rows: list[dict[str, Any]],
+    event_rows: list[dict[str, Any]],
+    episode_rows: list[dict[str, Any]],
+    pre_event_beats: int,
+    record_filter: set[str] | None = None,
+) -> list[tuple[str, float | int]]:
     record_lengths: dict[str, int] = {}
-    with (run_dir / "ltst_transition_hmm_record_summary.csv").open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            record_lengths[row["record"]] = int(row["n_beats"])
+    for row in record_rows:
+        record = str(row["record"])
+        if record_filter is not None and record not in record_filter:
+            continue
+        record_lengths[record] = int(row["n_beats"])
 
     lead_pos: dict[str, list[tuple[int, int]]] = defaultdict(list)
     strict_pos: dict[str, list[tuple[int, int]]] = defaultdict(list)
     n_events = 0
-    with (run_dir / "ltst_transition_hmm_event_table.csv").open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            record = row["record"]
-            start = int(row["event_start_idx"])
-            end = int(row["event_end_idx"])
-            add_interval(strict_pos, record, start, end)
-            add_interval(lead_pos, record, max(0, start - pre_event_beats), end)
-            n_events += 1
+    for row in event_rows:
+        record = str(row["record"])
+        if record not in record_lengths:
+            continue
+        start = int(row["event_start_idx"])
+        end = int(row["event_end_idx"])
+        add_interval(strict_pos, record, start, end)
+        add_interval(lead_pos, record, max(0, start - pre_event_beats), end)
+        n_events += 1
 
     pred: dict[str, list[tuple[int, int]]] = defaultdict(list)
     raw_pred_rows: list[tuple[str, int, int]] = []
-    with (run_dir / "ltst_transition_hmm_episodes.csv").open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            if row.get("method", "hmm") != "hmm":
-                continue
-            record = row["record"]
-            start = int(row["start_idx"])
-            end = int(row["end_idx"])
-            add_interval(pred, record, start, end)
-            raw_pred_rows.append((record, start, end))
+    for row in episode_rows:
+        if row.get("method", "hmm") != "hmm":
+            continue
+        record = str(row["record"])
+        if record not in record_lengths:
+            continue
+        start = int(row["start_idx"])
+        end = int(row["end_idx"])
+        add_interval(pred, record, start, end)
+        raw_pred_rows.append((record, start, end))
 
     lead_pos = {key: merge_intervals(value) for key, value in lead_pos.items()}
     strict_pos = {key: merge_intervals(value) for key, value in strict_pos.items()}
@@ -135,6 +147,22 @@ def compute_metrics(run_dir: Path, pre_event_beats: int) -> list[tuple[str, floa
         ("false_positive_episode_count", false_positive_episode_count),
         ("false_positive_episode_fraction", ratio(false_positive_episode_count, len(raw_pred_rows))),
     ]
+
+
+def compute_metrics(run_dir: Path, pre_event_beats: int, record_filter: set[str] | None = None) -> list[tuple[str, float | int]]:
+    with (run_dir / "ltst_transition_hmm_record_summary.csv").open(newline="", encoding="utf-8") as handle:
+        record_rows = list(csv.DictReader(handle))
+    with (run_dir / "ltst_transition_hmm_event_table.csv").open(newline="", encoding="utf-8") as handle:
+        event_rows = list(csv.DictReader(handle))
+    with (run_dir / "ltst_transition_hmm_episodes.csv").open(newline="", encoding="utf-8") as handle:
+        episode_rows = list(csv.DictReader(handle))
+    return compute_metrics_from_tables(
+        record_rows=record_rows,
+        event_rows=event_rows,
+        episode_rows=episode_rows,
+        pre_event_beats=pre_event_beats,
+        record_filter=record_filter,
+    )
 
 
 def main() -> None:

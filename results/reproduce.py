@@ -9,6 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = REPO_ROOT / "results"
 DEFAULT_LTST_RUN = REPO_ROOT / "artifact" / "runs" / "ltst_full_86_20260405T035505Z"
+DEFAULT_SOLAR_ALIGNMENT = REPO_ROOT / "artifact" / "runs" / "solar_20260408T051653Z" / "solar_alignment.csv"
 DEFAULT_SOLAR_FIGURE = REPO_ROOT / "artifact" / "figures" / "figure2_solar_alignment_plot.png"
 
 
@@ -82,19 +83,6 @@ def run_ltst_hmm(run_dir: Path | None) -> None:
     )
 
 
-def run_esp32_contract(run_dir: Path | None) -> None:
-    base_run_dir = run_dir.resolve() if run_dir else find_latest_ltst_run()
-    script = REPO_ROOT / "ESP32" / "ltst_esp32_contract_sim.py"
-    run_command(
-        [
-            sys.executable,
-            str(script),
-            "--run-dir",
-            str(base_run_dir),
-        ]
-    )
-
-
 def run_solar_hmm() -> None:
     script = REPO_ROOT / "solar.py"
     run_command(
@@ -123,6 +111,37 @@ def run_solar_hmm() -> None:
     )
 
 
+def run_solar_hmm_transition_only_dev() -> None:
+    script = REPO_ROOT / "solar.py"
+    run_command(
+        [
+            sys.executable,
+            str(script),
+            "--start-time",
+            "2007-01-01",
+            "--end-time",
+            "2008-12-31",
+            "--write-feature-csv",
+            "--beta-short",
+            "0.20",
+            "--beta-long",
+            "0.003",
+            "--projective-min-state-energy",
+            "1e-8",
+            "--hmm-rolling-window-minutes",
+            "15",
+            "--hmm-merge-gap-minutes",
+            "5",
+            "--hmm-alert-active-tail-minutes",
+            "0",
+            "--hmm-alert-max-minutes",
+            "180",
+            "--hmm-alert-cooldown-minutes",
+            "180",
+        ]
+    )
+
+
 def run_solar_figure(alignment_csv: Path, output: Path) -> None:
     script = RESULTS_DIR / "reproduce_solar_alignment_figure.py"
     run_command(
@@ -138,7 +157,7 @@ def run_solar_figure(alignment_csv: Path, output: Path) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Cross-platform reproduction runner for the finished cardiac, ESP32, and solar results.")
+    parser = argparse.ArgumentParser(description="Cross-platform reproduction runner for the finished cardiac and solar results.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ltst_full = subparsers.add_parser("ltst-full", help="Rebuild the 86-record LTST cohort from PhysioNet.")
@@ -152,18 +171,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Base ltst_full_86_* run directory. Defaults to the latest matching run under artifact/runs.",
     )
 
-    esp32_contract = subparsers.add_parser("esp32-contract", help="Run the LTST-derived ESP32 fixed-point contract simulation.")
-    esp32_contract.add_argument(
-        "--run-dir",
-        type=Path,
-        default=None,
-        help="Base ltst_full_86_* run directory. Defaults to the latest matching run under artifact/runs.",
+    subparsers.add_parser("solar-hmm", help="Run the finalized layered solar HMM on the OMNI cache.")
+    subparsers.add_parser(
+        "solar-hmm-transition-dev",
+        help="Run the 2007-2008 anchored solar transition-only dev pass with the selected beta pair and longer refractory.",
     )
 
-    subparsers.add_parser("solar-hmm", help="Run the finalized layered solar HMM on the OMNI cache.")
-
     solar_figure = subparsers.add_parser("solar-figure", help="Regenerate the Figure 2 solar alignment plot from an alignment CSV.")
-    solar_figure.add_argument("--alignment-csv", type=Path, required=True, help="Solar alignment CSV to plot.")
+    solar_figure.add_argument(
+        "--alignment-csv",
+        type=Path,
+        default=DEFAULT_SOLAR_ALIGNMENT,
+        help="Solar alignment CSV to plot.",
+    )
     solar_figure.add_argument(
         "--output",
         type=Path,
@@ -171,7 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output PNG path for the regenerated figure.",
     )
 
-    all_parser = subparsers.add_parser("all", help="Run the full LTST cohort build, LTST HMM, ESP32 contract simulation, and solar HMM in sequence.")
+    all_parser = subparsers.add_parser("all", help="Run the full LTST cohort build, LTST HMM, and solar HMM in sequence.")
     all_parser.add_argument("--records", default="all", help="Comma-separated LTST records or 'all'.")
 
     return parser
@@ -187,11 +207,11 @@ def main() -> None:
     if args.command == "ltst-hmm":
         run_ltst_hmm(run_dir=args.run_dir)
         return
-    if args.command == "esp32-contract":
-        run_esp32_contract(run_dir=args.run_dir)
-        return
     if args.command == "solar-hmm":
         run_solar_hmm()
+        return
+    if args.command == "solar-hmm-transition-dev":
+        run_solar_hmm_transition_only_dev()
         return
     if args.command == "solar-figure":
         run_solar_figure(alignment_csv=args.alignment_csv, output=args.output)
@@ -199,7 +219,6 @@ def main() -> None:
     if args.command == "all":
         run_ltst_full(records=args.records)
         run_ltst_hmm(run_dir=None)
-        run_esp32_contract(run_dir=None)
         run_solar_hmm()
         return
     raise ValueError(f"Unsupported command: {args.command}")
