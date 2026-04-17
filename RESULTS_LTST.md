@@ -72,6 +72,102 @@ Interpretation:
 - The detector is early and broad, but still too active to be treated as a clean clinical alarm.
 - The main translational bottleneck is false-alert burden, not event coverage.
 
+## 3. Three-Record Method Studies
+
+These smaller LTST studies are not replacements for the 86-record cohort results above. They are method-facing probes used to test how newer geometry branches behave under tighter causal and reproducibility constraints.
+
+### Graph Sidecar Pilot
+
+Entry points:
+
+- [`artifact/ltst_three_record_graph_sidecar_test.py`](artifact/ltst_three_record_graph_sidecar_test.py)
+- [`tests/test_ltst_three_record_graph_sidecar_test.py`](tests/test_ltst_three_record_graph_sidecar_test.py)
+
+Use:
+
+- Compare the updated geometry observer against the older graph branch on three held-out LTST records.
+
+Main finding:
+
+- The updated geometry observer consistently beat the legacy graph branch in that pilot.
+- Naive graph blending was often harmful.
+
+Interpretation:
+
+- This study was valuable as an architecture signal: it justified keeping the updated geometry observer and dropping the older graph score as a default partner.
+
+### Audited Online DMD Rebuild
+
+Entry points:
+
+- [`artifact/ltst_three_record_online_dmd_clean_rebuild.py`](artifact/ltst_three_record_online_dmd_clean_rebuild.py)
+- [`tests/test_ltst_three_record_online_dmd_clean_rebuild.py`](tests/test_ltst_three_record_online_dmd_clean_rebuild.py)
+
+Use:
+
+- Rebuild the remote three-record DMD replication under stricter conditions:
+  - remove future-label leakage
+  - enforce causal modal alignment
+  - move feature selection inside the leave-one-record-out folds
+  - filter unstable baseline features before scoring
+
+Main finding:
+
+- After audit, the earlier oversized observer win disappeared.
+- The DMD substrate became the strongest default lane.
+- The updated geometry sidecar still helped selectively, especially in a short-horizon structured pocket represented by `s30742`.
+
+Interpretation:
+
+- This is the more trustworthy result.
+- The geometry observer is not a universal replacement for substrate; it behaves more like a pocket-sensitive short-horizon transition detector.
+
+### Pocket-Gating Probe
+
+Entry points:
+
+- [`artifact/ltst_three_record_online_dmd_gate_probe.py`](artifact/ltst_three_record_online_dmd_gate_probe.py)
+- [`tests/test_ltst_three_record_online_dmd_gate_probe.py`](tests/test_ltst_three_record_online_dmd_gate_probe.py)
+
+Use:
+
+- Probe whether short-horizon observer routing can improve on the audited DMD baseline without reintroducing leakage.
+
+Main finding:
+
+- A fast-plus-short multiscale route improved the audited pooled `5s` and `10s` horizons over substrate alone.
+- Adding a long `100`-row gate overconstrained the route and did not improve the early-horizon result.
+
+Interpretation:
+
+- The useful observer effect in this setup appears to be short-memory rather than long-memory.
+- Routing matters more than pooled observer complexity.
+
+### S4 Effective Operator Probe
+
+Entry points:
+
+- [`artifact/ltst_s4_effective_operator_probe.py`](artifact/ltst_s4_effective_operator_probe.py)
+- [`tests/test_ltst_s4_effective_operator_probe.py`](tests/test_ltst_s4_effective_operator_probe.py)
+
+Use:
+
+- Examine LTST dynamics through a structured state-space / effective-operator lens, including operator splits, projected diagnostics, and imminent-onset labeling.
+
+Interpretation:
+
+- This is an operator-facing companion probe rather than a replacement detector.
+- Its main role in the public repo is to preserve the S4-style operator work in a tested, reproducible form next to the LTST geometry studies.
+
+### Method Takeaway
+
+Across these three-record studies, the main novel lesson is not simply that "the observer works" or that the original replication failed. The more useful conclusion is:
+
+- broad Lie activation and structured directional geometry are different regimes
+- the updated geometry observer is strongest in short-horizon structured pockets
+- routing beats pooled complexity in this setting
+- substrate should remain the default lane unless a structured short-memory geometry pocket is active
+
 ## Entry Points
 
 - Base cohort build: [`artifact/ltst_full_86_study.py`](artifact/ltst_full_86_study.py)
